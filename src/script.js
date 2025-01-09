@@ -9,10 +9,11 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 let camera, scene, renderer;
 let controller1, controller2;
 let controllerGrip1, controllerGrip2;
-let root;
+let root, panelRoot;
 let controls;
 let counter = 0;
 let tempUi, x;
+let panelAnchor;
 
 const sizes = {
   width: window.innerWidth,
@@ -54,18 +55,18 @@ function init() {
   mesh.position.set(0, 1.5, -0.5);
   // scene.add(mesh);
 
+  renderer = new THREE.WebGLRenderer({ antialias: true, canvas });
+
+  /*** UI ***/
   const ui = new THREE.Group();
   ui.position.set(0, 1.5, -0.6);
   scene.add(ui);
 
-  renderer = new THREE.WebGLRenderer({ antialias: true, canvas });
-
-  /*** UI ***/
   root = new Root(camera, renderer, {
     flexDirection: "row",
     gap: 0,
     width: 32,
-    borderRadius: 4,
+    borderRadius: 2,
     padding: 1,
     alignItems: "center",
     backgroundColor: 0x5c45eb,
@@ -77,7 +78,7 @@ function init() {
 
   const engine = new Text("Engine: Amber", { fontSize: 3, color: "white" });
 
-  x = new Container({
+  const textContainer = new Container({
     padding: 2,
     height: "100%",
     width: "100%",
@@ -85,8 +86,65 @@ function init() {
     flexDirection: "column",
     gap: 2,
   });
-  root.add(x);
-  x.add(tempUi, engine);
+  root.add(textContainer);
+  textContainer.add(tempUi, engine);
+
+  panelAnchor = new THREE.Group();
+  scene.add(panelAnchor);
+
+  panelRoot = new Root(camera, renderer, {
+    flexDirection: "column",
+    gap: 0,
+    width: 32,
+    borderRadius: 2,
+    padding: 1,
+    alignItems: "center",
+    backgroundColor: 0x5c45eb,
+    backgroundOpacity: 0.8,
+  });
+
+  panelAnchor.add(panelRoot);
+
+  const panelText = new Text("Panel Info", { fontSize: 3, color: "white" });
+
+  const panelContainer = new Container({
+    padding: 2,
+    height: "100%",
+    width: "100%",
+    justifyContent: "flex-start",
+    flexDirection: "column",
+    gap: 2,
+  });
+
+  const buttonContainer = new Container({
+    padding: 1,
+    height: "100%",
+    width: "100%",
+    justifyContent: "space-between",
+    flexDirection: "row",
+    gap: 2,
+  });
+
+  const buttonStyles = {
+    padding: 1,
+    height: "100%",
+    width: "100%",
+    backgroundColor: 0x9bf99f,
+    borderRadius: 1,
+    fontSize: 2,
+    color: 0x4432B0,
+    textAlign: "center",
+    justifyContent: "center",
+    alignItems: "center",
+    fontWeight: "bold",
+  };
+
+  const button1 = new Text("Button 1", buttonStyles);
+  const button2 = new Text("Button 2", buttonStyles);
+
+  buttonContainer.add(button1, button2);
+  panelRoot.add(panelContainer, buttonContainer);
+  panelContainer.add(panelText);
 
   renderer.setPixelRatio(window.devicePixelRatio, 2);
   renderer.setSize(sizes.width, sizes.height);
@@ -150,6 +208,12 @@ function animate(time) {
   counter = Math.floor(time / 1000);
   tempUi.setText("Temperature: " + counter);
   root.update(delta);
+  if (controller1) {
+    controller1.getWorldPosition(panelAnchor.position);
+    panelAnchor.position.y += 0.1;
+    panelAnchor.lookAt(camera.position);
+    panelRoot.update(delta);
+  }
   controls.update(delta);
   renderer.render(scene, camera);
 }
