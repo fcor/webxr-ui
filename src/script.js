@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { XRButton } from "three/examples/jsm/webxr/XRButton.js";
 import { XRControllerModelFactory } from "three/examples/jsm/webxr/XRControllerModelFactory.js";
+import { OculusHandModel } from "three/examples/jsm/webxr/OculusHandModel.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { reversePainterSortStable, Container, Root, Text, Image } from "@pmndrs/uikit";
@@ -8,12 +9,18 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
 let camera, scene, renderer;
 let controller1, controller2;
+let hand1, hand2;
 let controllerGrip1, controllerGrip2;
 let root, panelRoot;
 let controls;
 let counter = 0;
 let tempUi, x;
 let panelAnchor;
+let button1, button2;
+
+let hoveredButton = null;
+const HOVER_DISTANCE = 0.05;
+const HAND_TRIGGER_DISTANCE = 0.05;
 
 const sizes = {
   width: window.innerWidth,
@@ -37,7 +44,7 @@ function init() {
   const gltfLoader = new GLTFLoader();
   gltfLoader.setDRACOLoader(dracoLoader);
   const grid = new THREE.GridHelper(4, 1, 0x111111, 0x111111);
-  scene.add(grid);
+  // scene.add(grid);
 
   scene.add(new THREE.HemisphereLight(0x888877, 0x777788, 3));
 
@@ -132,15 +139,22 @@ function init() {
     backgroundColor: 0x9bf99f,
     borderRadius: 1,
     fontSize: 2,
-    color: 0x4432B0,
+    color: 0x4432b0,
     textAlign: "center",
     justifyContent: "center",
     alignItems: "center",
     fontWeight: "bold",
+    hover: { backgroundColor: 0x51f55a },
+    onClick: (e) => {
+      e.object.setStyle({ backgroundColor: 0xfbfaff, color: 0x9bf99f });
+      setTimeout(() => {
+        e.object.setStyle({ backgroundColor: 0x9bf99f, color: 0x4432b0, hover: { backgroundColor: 0x51f55a } });
+      }, 200);
+    },
   };
 
-  const button1 = new Text("Button 1", buttonStyles);
-  const button2 = new Text("Button 2", buttonStyles);
+  button1 = new Text("Increase", buttonStyles);
+  button2 = new Text("Decrease", buttonStyles);
 
   buttonContainer.add(button1, button2);
   panelRoot.add(panelContainer, buttonContainer);
@@ -153,38 +167,57 @@ function init() {
   renderer.localClippingEnabled = true;
   renderer.setTransparentSort(reversePainterSortStable);
   document.body.appendChild(
-    XRButton.createButton(
-      renderer
-      //   {
-      //   optionalFeatures: ["depth-sensing"],
-      //   depthSensing: { usagePreference: ["gpu-optimized"], dataFormatPreference: [] },
-      // }
-    )
+    XRButton.createButton(renderer, {
+      optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking", "unbounded"],
+    })
   );
 
-  const controllerModelFactory = new XRControllerModelFactory();
-
+  // Controllers
   controller1 = renderer.xr.getController(0);
   controller1.addEventListener("connected", onControllerConnected);
-  controller1.addEventListener("selectstart", onSelectStart);
-  controller1.addEventListener("selectend", onSelectEnd);
-  controller1.addEventListener("squeezestart", onSqueezeStart);
-  controller1.addEventListener("squeezeend", onSqueezeEnd);
-  controllerGrip1 = renderer.xr.getControllerGrip(0);
-  controllerGrip1.add(controllerModelFactory.createControllerModel(controllerGrip1));
-  scene.add(controllerGrip1);
   scene.add(controller1);
 
   controller2 = renderer.xr.getController(1);
-  controller1.addEventListener("connected", onControllerConnected);
-  controller2.addEventListener("selectstart", onSelectStart);
-  controller2.addEventListener("selectend", onSelectEnd);
-  controller2.addEventListener("squeezestart", onSqueezeStart);
-  controller2.addEventListener("squeezeend", onSqueezeEnd);
+  controller2.addEventListener("connected", onControllerConnected);
+  scene.add(controller2);
+
+  const controllerModelFactory = new XRControllerModelFactory();
+
+  // Hand1
+  controllerGrip1 = renderer.xr.getControllerGrip(0);
+  controllerGrip1.add(controllerModelFactory.createControllerModel(controllerGrip1));
+  controllerGrip1.addEventListener("selectstart", onSelectStart);
+  controllerGrip1.addEventListener("selectend", onSelectEnd);
+  scene.add(controllerGrip1);
+
+  hand1 = renderer.xr.getHand(0);
+  hand1.add(new OculusHandModel(hand1));
+  hand1.addEventListener("pinchstart", onPinchStart);
+  hand1.addEventListener("pinchend", onPinchEnd);
+  scene.add(hand1);
+
+  // Hand2
   controllerGrip2 = renderer.xr.getControllerGrip(1);
   controllerGrip2.add(controllerModelFactory.createControllerModel(controllerGrip2));
+  controllerGrip2.addEventListener("selectstart", onSelectStart);
+  controllerGrip2.addEventListener("selectend", onSelectEnd);
   scene.add(controllerGrip2);
-  scene.add(controller2);
+
+  hand2 = renderer.xr.getHand(1);
+  hand2.add(new OculusHandModel(hand2));
+  hand2.addEventListener("pinchstart", onPinchStart);
+  hand2.addEventListener("pinchend", onPinchEnd);
+  scene.add(hand2);
+
+  const pivot = new THREE.Mesh(new THREE.IcosahedronGeometry(0.01, 3));
+  pivot.name = "pivot";
+  pivot.position.z = -0.05;
+  pivot.position.y = -0.03;
+  const group = new THREE.Group();
+  group.add(pivot);
+
+  controllerGrip1.add(group.clone());
+  controllerGrip2.add(group.clone());
 }
 
 window.addEventListener("resize", () => {
@@ -205,7 +238,6 @@ let prev = null;
 function animate(time) {
   const delta = prev == null ? 0 : time - prev;
   prev = time;
-  counter = Math.floor(time / 1000);
   tempUi.setText("Temperature: " + counter);
   root.update(delta);
   if (controller1) {
@@ -213,15 +245,16 @@ function animate(time) {
     panelAnchor.position.y += 0.1;
     panelAnchor.lookAt(camera.position);
     panelRoot.update(delta);
+    checkButtonHover();
   }
   controls.update(delta);
   renderer.render(scene, camera);
 }
 
-function onSqueezeStart(e) {
+function onPinchStart(e) {
   console.log(e);
 }
-function onSqueezeEnd(e) {
+function onPinchEnd(e) {
   console.log(e);
 }
 
@@ -230,9 +263,139 @@ function onControllerConnected(e) {
 }
 
 function onSelectStart(e) {
-  console.log(e);
+  if (hoveredButton) {
+    if (hoveredButton === button1) {
+      counter++;
+    } else if (hoveredButton === button2) {
+      if (counter > 0) {
+        counter--;
+      }
+    }
+
+    hoveredButton.dispatchEvent({
+      type: "click",
+      distance: 0,
+      nativeEvent: {},
+      object: hoveredButton,
+      point: new THREE.Vector3(),
+      pointerId: -1,
+    });
+  }
 }
 
 function onSelectEnd(e) {
   console.log(e);
+}
+
+function checkButtonHover() {
+  let closestButton = null;
+  let closestDistance = HOVER_DISTANCE;
+  const buttons = [button1, button2];
+  const inputPoints = [];
+
+  // Collect all possible interaction points
+  if (controllerGrip1) {
+    const pivot = controllerGrip1.getObjectByName("pivot");
+    if (pivot) {
+      const point = new THREE.Vector3();
+      pivot.getWorldPosition(point);
+      inputPoints.push(point);
+    }
+  }
+
+  if (controllerGrip2) {
+    const pivot = controllerGrip2.getObjectByName("pivot");
+    if (pivot) {
+      const point = new THREE.Vector3();
+      pivot.getWorldPosition(point);
+      inputPoints.push(point);
+    }
+  }
+
+  // Find the closest button from any input point
+  buttons.forEach((button) => {
+    if (button) {
+      const buttonPosition = new THREE.Vector3();
+      button.getWorldPosition(buttonPosition);
+
+      // Check distance from each input point to this button
+      inputPoints.forEach((inputPoint) => {
+        const distance = inputPoint.distanceTo(buttonPosition);
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closestButton = button;
+        }
+      });
+    }
+  });
+
+  // Handle hover state changes
+  if (hoveredButton !== closestButton) {
+    if (hoveredButton) {
+      hoveredButton.dispatchEvent({
+        type: "pointerout",
+        distance: 0,
+        nativeEvent: {},
+        object: hoveredButton,
+        point: new THREE.Vector3(),
+        pointerId: -1,
+      });
+    }
+
+    if (closestButton) {
+      closestButton.dispatchEvent({
+        type: "pointerover",
+        distance: 0,
+        nativeEvent: {},
+        object: closestButton,
+        point: new THREE.Vector3(),
+        pointerId: -1,
+      });
+    }
+
+    hoveredButton = closestButton;
+  }
+
+  checkHandInteractions();
+}
+
+function checkHandInteractions() {
+  const buttons = [button1, button2];
+
+  const checkHand = (hand) => {
+    if (hand?.joints?.["index-finger-tip"]) {
+      const fingerTip = new THREE.Vector3();
+      hand.joints["index-finger-tip"].getWorldPosition(fingerTip);
+      
+      buttons.forEach((button) => {
+        if (button) {
+          const buttonPosition = new THREE.Vector3();
+          button.getWorldPosition(buttonPosition);
+          const distance = fingerTip.distanceTo(buttonPosition);
+          
+          if (distance < HAND_TRIGGER_DISTANCE) {
+            console.log("hey")
+            // Trigger click when finger is very close
+            if (button === button1) {
+              counter++;
+            } else if (button === button2 && counter > 0) {
+              counter--;
+            }
+
+            button.dispatchEvent({
+              type: "click",
+              distance: 0,
+              nativeEvent: {},
+              object: button,
+              point: new THREE.Vector3(),
+              pointerId: -1,
+            });
+          }
+        }
+      });
+    }
+  };
+
+  checkHand(hand1);
+  checkHand(hand2);
 }
